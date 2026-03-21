@@ -1,4 +1,4 @@
 bot.py
 requirements.txt python-telegram-bot==22.5
-procfile web: python bot.py
+procfile web: python 
 /start пр
