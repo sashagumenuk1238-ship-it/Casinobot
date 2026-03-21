@@ -1,0 +1,46 @@
+bot.py
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import os
+
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    start_message = """Здравствуйте! 👋 Добро пожаловать в игру.
+
+Вот доступные команды:
+> бас — играть в мини-игру
+> кфб — купить биткоин-ферму
+> кд — купить дом
+> км — купить машину"""
+    await update.message.reply_text(start_message)
+
+# Команда кфб
+async def kfb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Вы выбрали команду кфб — покупка биткоин-фермы!")
+
+# Команда бас
+async def bas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Вы выбрали команду бас — мини-игра!")
+
+# Команда кд
+async def kd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Вы выбрали команду кд — покупка дома!")
+
+# Команда км
+async def km(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Вы выбрали команду км — покупка машины!")
+
+# Основной запуск бота
+if name == "main":
+    TOKEN = os.environ.get("BOT_TOKEN")  # берем токен из переменных Railway
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    # Подключаем команды
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("кфб", kfb))
+    app.add_handler(CommandHandler("бас", bas))
+    app.add_handler(CommandHandler("кд", kd))
+    app.add_handler(CommandHandler("км", km))
+
+    app.run_polling()
