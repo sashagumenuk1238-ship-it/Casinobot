@@ -1,13 +1,3 @@
 bot.py
 requirements.tdt
-Procfile 
-# Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! 👋 Добро пожаловать в игру.\n\n"
-        "Вот команды, которые можно использовать:\n"
-        "> бас — играть в мини-игру\n"
-        "> кфб — купить биткоин-ферму\n"
-        "> кд — купить дом\n"
-        "> км — купить машину"
-    )
+Procfile
