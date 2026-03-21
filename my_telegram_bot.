@@ -1,4 +1,16 @@
 bot.py
 requirements.txt python-telegram-bot==22.5
-procfile web: python 
-/start пр
+procfile web: python bot.py
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import os
+
+# функция для команды /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! 👋 Добро пожаловать в игру.")
+
+if name == "main":
+    TOKEN = os.environ.get("BOT_TOKEN")  # токен берём из Railway
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))  # ловим команду /start
+    app.run_polling()
