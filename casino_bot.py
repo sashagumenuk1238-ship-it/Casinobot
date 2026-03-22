@@ -1,4 +1,3 @@
-𝗴𝗲𝗻𝘁𝗹𝗲𝗺𝗮𝗻👻:
 import os, json, time, random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
