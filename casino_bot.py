@@ -62,8 +62,7 @@ WATERS = {
 }
 
 # ── ХРАНИЛИЩЕ ────────────────────────────────────────────────────────────────
-STORAGES = {
-    "bucket":  {"name": "🪣 Ведро",           "price": 0,     "size": 5},"box":     {"name": "📦 Ящик",            "price": 300,   "size": 15},
+STORAGES = { "box":     {"name": "📦 Ящик",            "price": 300,   "size": 15},
     "fridge":  {"name": "❄️ Холодильник",     "price": 1500,  "size": 40},
     "freezer": {"name": "🏭 Морозильник",     "price": 8000,  "size": 100},
     "ship":    {"name": "🚢 Трюм корабля",    "price": 30000, "size": 9999},
@@ -177,7 +176,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         caught = dice <= int(chance / 16.67)
 
         if caught:
-            available = [f for f in water["fish"] if FISH[f]["level"] <= level]if not available:
+            available = [f for f in water["fish"] if FISH[f]["level"] <= level]
+    "bucket":  {"name": "🪣 Ведро",           "price": 0,     "size": 5},if not available:
                 available = ["karas"]
             fish_id = random.choice(available)
             fish = FISH[fish_id]
