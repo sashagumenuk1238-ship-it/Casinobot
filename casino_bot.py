@@ -1,16 +1,42 @@
-import os,json,time,random
+import os,json,time,random,asyncio
 from telegram import Update,InlineKeyboardButton,InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder,CommandHandler,CallbackQueryHandler,ContextTypes
+from telegram.ext import ApplicationBuilder,CommandHandler,CallbackQueryHandler,MessageHandler,filters,ContextTypes
 
 TOKEN=os.environ.get("TOKEN")
 DATA="users.json"
 
-FISH={"pond":{"Карась":[20,50,40],"Окунь":[80,150,35],"Лещ":[100,200,25]},"river":{"Окунь":[80,150,30],"Лещ":[100,200,30],"Щука":[300,600,40]},"sea":{"Щука":[300,600,30],"Сом":[500,1000,40],"Осетр":[2000,5000,30]},"ocean":{"Сом":[500,1000,20],"Осетр":[2000,5000,40],"Золотая":[10000,50000,40]}}
+FISH={
+    "karas":  {"name":"Карась",   "weight":0.5, "price":[20,50],    "exp":5,  "rare":40},
+    "okun":   {"name":"Окунь",    "weight":0.8, "price":[80,150],   "exp":10, "rare":30},
+    "leshch": {"name":"Лещ",      "weight":1.5, "price":[100,200],  "exp":15, "rare":20},
+    "shchuka":{"name":"Щука",     "weight":3.0, "price":[300,600],  "exp":30, "rare":7},
+    "som":    {"name":"Сом",      "weight":8.0, "price":[500,1000], "exp":50, "rare":2},
+    "osetr":  {"name":"Осётр",    "weight":15.0,"price":[2000,5000],"exp":100,"rare":1},
+}
+
 RODS={"wood":["Деревянная",0,0],"steel":["Стальная",500,15],"carbon":["Карбоновая",2000,30],"gold":["Золотая",10000,50]}
-LINES={"basic":["Обычная",0,0],"nylon":["Нейлоновая",200,10],"braid":["Плетеная",2000,25]}
+LINES={"basic":["Обычная",0,0],"nylon":["Нейлоновая",200,10],"braid":["Плетёная",2000,25]}
 BAITS={"worm":["Червь",10,0],"maggot":["Опарыш",50,10],"shrimp":["Креветка",300,25],"caviar":["Икра",1000,45]}
-WATERS={"pond":["Пруд",0],"river":["Река",1000],"sea":["Море",5000],"ocean":["Океан",20000]}
 STORAGE={"bucket":["Ведро",0,5],"box":["Ящик",300,20],"fridge":["Холодильник",1500,50],"freezer":["Морозильник",8000,150]}
+
+VEHICLES={
+    "none":  ["Пешком",    0,     {"pond":0,"river":1800,"sea":-1,"ocean":-1}],
+    "bike":  ["Велосипед", 200,   {"pond":0,"river":900, "sea":-1,"ocean":-1}],
+    "vaz":   ["Жигули",    3000,  {"pond":0,"river":300, "sea":-1,"ocean":-1}],
+    "suv":   ["Внедорожник",15000,{"pond":0,"river":0,   "sea":-1,"ocean":-1}],
+    "barge": ["Баржа",     40000, {"pond":0,"river":0,   "sea":1200,"ocean":-1}],
+    "yacht": ["Яхта",      120000,{"pond":0,"river":0,   "sea":0,  "ocean":1800}],
+}
+
+WATERS={
+    "pond":  ["Пруд",  0,  ["karas","okun","leshch"]],
+    "river": ["Река",  0,  ["okun","leshch","shchuka"]],
+    "sea":   ["Море",  0,  ["shchuka","som","osetr"]],
+    "ocean": ["Океан", 0,  ["som","osetr"]],
+}
+
+LEVELS=[0,500,1500,3500,7000,15000,30000,60000,120000,250000]
+LNAMES=["Новичок","Рыбак","Опытный","Умелый","Мастер","Эксперт","Профи","Легенда","Морской волк","Великий рыбак"]
 
 def db():
     try:
@@ -23,93 +49,168 @@ def save(d):
 def gu(uid):
     d=db()
     if uid not in d:
-        d[uid]={"usd":500.0,"exp":0,"fish":{},"casts":0,"last":0,"rod":"wood","line":"basic","bait":"worm","water":"pond","storage":"bucket"}
+        d[uid]={"usd":500.0,"exp":0,"fish":{},"casts":0,"last":0,"rod":"wood","line":"basic","bait":"worm","water":"pond","storage":"bucket","vehicle":"none","fishing":False}
         save(d)
     return d
 
 def lvl(exp):
-    levels=[0,500,1500,3500,7000,15000,30000,60000,120000,250000]
-    names=["Новичок","Рыбак","Опытный","Умелый","Мастер","Эксперт","Профи","Легенда","Морской волк","Великий рыбак"]
     lv=1
-    for i,r in enumerate(levels):
+    for i,r in enumerate(LEVELS):
         if exp>=r: lv=i+1
-    return min(lv,10),names[min(lv,10)-1]
+    return min(lv,10)
 
-def bonus(u):
+def get_bonus(u):
     return RODS[u["rod"]][2]+LINES[u["line"]][2]+BAITS[u["bait"]][2]
+
+def can_go(u,water):
+    v=VEHICLES[u["vehicle"]]
+    t=v[2].get(water,-1)
+    return t
+
+def fish_price(fid,weight):
+    f=FISH[fid]
+    base=random.randint(f["price"][0],f["price"][1])
+    return int(base*weight)
 
 async def start(update,ctx):
     uid=str(update.effective_user.id)
     gu(uid)
+    name=update.effective_user.first_name
     await update.message.reply_text(
-        "🎣 Привет рыбак!\n\n"
-        "/fish - рыбачить\n"
-        "/inv - инвентарь\n"
-        "/sell - продать рыбу\n"
-        "/bal - баланс\n"
-        "/profile - профиль\n"
-        "/shop - магазин\n"
-        "/water - водоемы\n"
-        "/quest - квесты\n\n"
-        "Старт: $500"
+        "🎣 Привет "+name+"!\n\n"
+        "Команды:\n"
+        "/fish или рыбачить\n"
+        "/inv или инвентарь\n"
+        "/sell или продать\n"
+        "/bal или баланс\n"
+        "/profile или профиль\n"
+        "/shop или магазин\n"
+        "/water или водоемы\n"
+        "/garage или гараж\n"
+        "/rates или курс рыб\n"
+        "/quest или квесты\n\n"
+        "Старт: $500 Удачи!"
     )
 
-async def fish(update,ctx):
+async def do_fish(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
+
+    if u.get("fishing"):
+        await update.message.reply_text("Ты уже рыбачишь! Подожди результата")
+        return
+
     now=time.time()
     if u["casts"]>=10:
         el=now-u["last"]
         if el<1800:
-            await update.message.reply_text("😴 Отдохни "+str(int((1800-el)/60))+" мин")
+            mins=int((1800-el)/60)
+            await update.message.reply_text("Устал! Отдохни "+str(mins)+" мин")
             return
         u["casts"]=0
+
     st=STORAGE[u["storage"]]
     total=sum(u["fish"].values())
     if total>=st[2]:
-        await update.message.reply_text("📦 "+st[0]+" полное! /sell рыбу")
+        await update.message.reply_text("Хранилище полное! /sell рыбу")
         return
-    m=await update.message.reply_dice(emoji="🎲")
-    bn=bonus(u)
-    caught=m.dice.value>=4 or random.randint(1,100)<=bn//2
+
+    water=u["water"]
+    travel=can_go(u,water)
+    if travel==-1:
+        vname=VEHICLES[u["vehicle"]][0]
+        await update.message.reply_text(
+            "Не можешь добраться до "+WATERS[water][0]+"!\n"
+            "Текущий транспорт: "+vname+"\n"
+            "Для моря нужна Баржа\n"
+            "Для океана нужна Яхта"
+        )
+        return
+
+    u["fishing"]=True
+    save(d)
+
+    if travel>0:
+        mins=travel//60
+        await update.message.reply_text(
+            "🚗 Едешь к "+WATERS[water][0]+"...\n"
+            "Время в пути: "+str(mins)+" мин\n"
+            "Подожди!"
+        )
+        await asyncio.sleep(travel)
+
+    wait=random.randint(10,60)
+    msg=await update.message.reply_text(
+        "🎣 Закидываешь удочку...\n"
+        "〰〰〰〰〰〰〰\n"
+        "Ждёшь поклёва..."
+    )
+
+    await asyncio.sleep(wait)
+
+    d=gu(uid)
+    u=d[uid]
+    bn=get_bonus(u)
+    caught=random.randint(1,100)<=50+bn//2
+
     if caught:
-        fw=FISH[u["water"]]
+        fw=WATERS[water][2]
         pool=[]
-        for name,data in fw.items():
-            pool+=[name]*data[2]
-        fname=random.choice(pool)
-        fdata=fw[fname]
-        price=random.randint(fdata[0],fdata[1])
-        u["fish"][fname]=u["fish"].get(fname,0)+1
-        u["exp"]+=10
-        oldlv,_=lvl(u["exp"]-10)
-        newlv,newname=lvl(u["exp"])
-        result="🎣 Поймал "+fname+"!\n~$"+str(price)
+        for fid in fw:
+            pool+=[fid]*FISH[fid]["rare"]
+        fid=random.choice(pool)
+        fish=FISH[fid]
+        weight=round(fish["weight"]*random.uniform(0.8,1.3),1)
+        price=fish_price(fid,weight)
+        u["fish"][fid]=u["fish"].get(fid,0)+1
+        oldlv=lvl(u["exp"])
+        u["exp"]+=fish["exp"]
+        newlv=lvl(u["exp"])
+        result=(
+            "ПОКЛЁВ! Тянешь...\n\n"
+            "Поймал "+fish["name"]+"!\n"
+            "Вес: "+str(weight)+" кг\n"
+            "Цена: ~$"+str(price)+"\n"
+            "Опыт: +"+str(fish["exp"])
+        )
         if newlv>oldlv:
-            result+="\n\n🎉 Уровень "+str(newlv)+"! "+newname
+            result+="\n\nУРОВЕНЬ "+str(newlv)+"! "+LNAMES[newlv-1]
     else:
-        result="💨 Сорвалась!"
+        result="Сорвалась! Не повезло..."
+
     if u["casts"]==0: u["last"]=now
     u["casts"]+=1
+    u["fishing"]=False
     save(d)
-    await update.message.reply_text(result+"\n🎣 "+str(10-u["casts"])+"/10")
 
-async def inv(update,ctx):
+    try:
+        await msg.edit_text(
+            "🎣 Закидываешь удочку...\n"
+            "〰〰〰〰〰〰〰\n\n"
+            +result+"\n\n"
+            "Забросов: "+str(10-u["casts"])+"/10"
+        )
+    except:
+        await update.message.reply_text(result+"\n\nЗабросов: "+str(10-u["casts"])+"/10")
+
+async def do_inv(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
     if not u["fish"]:
-        await update.message.reply_text("🎒 Пусто! /fish")
+        await update.message.reply_text("Пусто! /fish")
         return
     st=STORAGE[u["storage"]]
     total=sum(u["fish"].values())
-    t="🎒 Рыба ("+str(total)+"/"+str(st[2])+"):\n\n"
-    for k,v in u["fish"].items():
-        t+=k+" x"+str(v)+"\n"
+    t="Рыба ("+str(total)+"/"+str(st[2])+"):\n\n"
+    for fid,cnt in u["fish"].items():
+        if fid in FISH:
+            f=FISH[fid]
+            t+=f["name"]+" x"+str(cnt)+" ("+str(f["weight"])+"кг)\n"
     await update.message.reply_text(t)
 
-async def sell(update,ctx):
+async def do_sell(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
@@ -117,91 +218,141 @@ async def sell(update,ctx):
         await update.message.reply_text("Нечего продавать!")
         return
     total=0
-    t="🏪 Продано:\n\n"
-    allfish={}
-    for w in FISH.values():
-        allfish.update(w)
-    for k,v in u["fish"].items():
-        p=allfish.get(k,[50,100,0])
-        earned=random.randint(p[0],p[1])*v
-        total+=earned
-        t+=k+" x"+str(v)+" = $"+str(earned)+"\n"
+    t="Продано:\n\n"
+    for fid,cnt in u["fish"].items():
+        if fid in FISH:
+            f=FISH[fid]
+            price=fish_price(fid,f["weight"])*cnt
+            total+=price
+            t+=f["name"]+" x"+str(cnt)+" = $"+str(price)+"\n"
     u["fish"]={}
     u["usd"]+=total
     save(d)
-    await update.message.reply_text(t+"\n+$"+str(total)+"\n💵 $"+str(int(u["usd"])))
+    await update.message.reply_text(t+"\n+$"+str(total)+"\nБаланс: $"+str(int(u["usd"])))
 
-async def bal(update,ctx):
+async def do_bal(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
-    lv,ln=lvl(u["exp"])
+    lv=lvl(u["exp"])
     await update.message.reply_text(
-        "💼 Баланс\n\n"
+        "Баланс\n\n"
         "💵 $"+str(int(u["usd"]))+"\n"
-        "⭐ Ур."+str(lv)+" "+ln+"\n"
-        "🌊 "+WATERS[u["water"]][0]+"\n"
-        "🎣 "+RODS[u["rod"]][0]+"\n"
-        "🧵 "+LINES[u["line"]][0]+"\n"
-        "🪱 "+BAITS[u["bait"]][0]
+        "Уровень: "+str(lv)+" "+LNAMES[lv-1]+"\n"
+        "Водоем: "+WATERS[u["water"]][0]+"\n"
+        "Транспорт: "+VEHICLES[u["vehicle"]][0]+"\n"
+        "Удочка: "+RODS[u["rod"]][0]+"\n"
+        "Наживка: "+BAITS[u["bait"]][0]
     )
 
-async def profile(update,ctx):
+async def do_profile(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
-    lv,ln=lvl(u["exp"])
+    lv=lvl(u["exp"])
     total=sum(u["fish"].values())
-    nxt=[0,500,1500,3500,7000,15000,30000,60000,120000,250000]
-    ne=nxt[min(lv,9)]
+    ne=LEVELS[min(lv,9)]
     await update.message.reply_text(
-        "👤 Профиль\n\n"
-        "⭐ "+str(lv)+" - "+ln+"\n"
-        "📊 Опыт: "+str(u["exp"])+"/"+str(ne)+"\n"
+        "Профиль\n\n"
+        "Уровень "+str(lv)+" - "+LNAMES[lv-1]+"\n"
+        "Опыт: "+str(u["exp"])+"/"+str(ne)+"\n"
         "💵 $"+str(int(u["usd"]))+"\n"
-        "🐟 Поймано: "+str(total)+"\n"
-        "🌊 "+WATERS[u["water"]][0]+"\n"
-        "📦 "+STORAGE[u["storage"]][0]
+        "Рыб поймано: "+str(total)+"\n"
+        "Водоем: "+WATERS[u["water"]][0]+"\n"
+        "Транспорт: "+VEHICLES[u["vehicle"]][0]
     )
 
-async def water(update,ctx):
+async def do_rates(update,ctx):
+    t="Курс рыб сейчас:\n\n"
+    for fid,f in FISH.items():
+        price=random.randint(f["price"][0],f["price"][1])
+        t+=f["name"]+" ("+str(f["weight"])+"кг) - $"+str(price)+"\n"
+    await update.message.reply_text(t)
+
+async def do_water(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
     rows=[]
     for wid,wdata in WATERS.items():
         cur="✅ " if u["water"]==wid else ""
-        rows.append([InlineKeyboardButton(cur+wdata[0]+" | $"+str(wdata[1]),callback_data="w_"+wid)])
-    await update.message.reply_text("🌊 Водоемы:\n💵 $"+str(int(u["usd"])),reply_markup=InlineKeyboardMarkup(rows))
+        travel=can_go(u,wid)
+        if travel==-1:
+            lock="🔒 "
+        elif travel==0:
+            lock=""
+        else:
+            lock="⏱"+str(travel//60)+"мин "
+        rows.append([InlineKeyboardButton(cur+lock+wdata[0],callback_data="w_"+wid)])
+    await update.message.reply_text(
+        "Водоемы:\n"
+        "Транспорт: "+VEHICLES[u["vehicle"]][0],
+        reply_markup=InlineKeyboardMarkup(rows)
+    )
 
-async def shop(update,ctx):
+async def do_shop(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
     rows=[
-        [InlineKeyboardButton("🎣 Удочки",callback_data="s_rod")],
-        [InlineKeyboardButton("🧵 Леска",callback_data="s_line")],
-        [InlineKeyboardButton("🪱 Наживка",callback_data="s_bait")],
-        [InlineKeyboardButton("📦 Хранилище",callback_data="s_storage")],
+        [InlineKeyboardButton("Удочки",callback_data="s_rod")],
+        [InlineKeyboardButton("Леска",callback_data="s_line")],
+        [InlineKeyboardButton("Наживка",callback_data="s_bait")],
+        [InlineKeyboardButton("Хранилище",callback_data="s_storage")],
     ]
-    await update.message.reply_text("🏪 Магазин\n💵 $"+str(int(u["usd"])),reply_markup=InlineKeyboardMarkup(rows))
+    await update.message.reply_text("Магазин\n💵 $"+str(int(u["usd"])),reply_markup=InlineKeyboardMarkup(rows))
 
-async def quest(update,ctx):
+async def do_garage(update,ctx):
+    uid=str(update.effective_user.id)
+    d=gu(uid)
+    u=d[uid]
+    rows=[]
+    for vid,vdata in VEHICLES.items():
+        if vid=="none": continue
+        cur="✅ " if u["vehicle"]==vid else ""
+        rows.append([InlineKeyboardButton(cur+vdata[0]+" | $"+str(vdata[1]),callback_data="v_"+vid)])
+    cur_v=VEHICLES[u["vehicle"]][0]
+    await update.message.reply_text(
+        "Гараж\n"
+        "Сейчас: "+cur_v+"\n"
+        "💵 $"+str(int(u["usd"]))+"\n\n"
+        "Купи технику:",
+        reply_markup=InlineKeyboardMarkup(rows)
+    )
+
+async def do_quest(update,ctx):
     uid=str(update.effective_user.id)
     d=gu(uid)
     u=d[uid]
     total=sum(u["fish"].values())
     q1="✅" if total>=5 else "⬜"
     q2="✅" if u["usd"]>=1000 else "⬜"
-    q3="✅" if u["casts"]>=10 else "⬜"
-    q4="✅" if u["exp"]>=500 else "⬜"
+    q3="✅" if u["exp"]>=500 else "⬜"
+    q4="✅" if u["vehicle"]!="none" else "⬜"
     await update.message.reply_text(
-        "📜 Квесты\n\n"
+        "Квесты\n\n"
         +q1+" Поймай 5 рыб - +$200\n"
         +q2+" Накопи $1000 - +$300\n"
-        +q3+" 10 забросов - +$100\n"
-        +q4+" 500 опыта - +$500"
+        +q3+" 500 опыта - +$500\n"
+        +q4+" Купи транспорт - +$400"
     )
+
+async def txt(update,ctx):
+    text=update.message.text.lower().strip()
+    cmds={
+        "рыбачить":do_fish,"рыбалка":do_fish,
+        "инвентарь":do_inv,"рыба":do_inv,
+        "продать":do_sell,"базар":do_sell,
+        "баланс":do_bal,"balance":do_bal,
+        "профиль":do_profile,
+        "магазин":do_shop,"shop":do_shop,
+        "водоемы":do_water,"водоём":do_water,
+        "гараж":do_garage,"garage":do_garage,
+        "курс":do_rates,"rates":do_rates,
+        "квесты":do_quest,"quest":do_quest,
+    }
+    if text in cmds:
+        await cmds[text](update,ctx)
 
 async def btn(update,ctx):
     q=update.callback_query
@@ -213,13 +364,27 @@ async def btn(update,ctx):
 
     if cb.startswith("w_"):
         wid=cb[2:]
-        wp=WATERS[wid][1]
-        if u["usd"]<wp:
-            await q.answer("Нужно $"+str(wp),show_alert=True); return
-        if u["water"]!=wid and wp>0: u["usd"]-=wp
+        travel=can_go(u,wid)
+        if travel==-1:
+            await q.answer("Нужен другой транспорт!",show_alert=True)
+            return
         u["water"]=wid
         save(d)
-        await q.edit_message_text("✅ Теперь рыбачишь: "+WATERS[wid][0])
+        await q.edit_message_text("Теперь рыбачишь: "+WATERS[wid][0])
+        return
+
+    if cb.startswith("v_"):
+        vid=cb[2:]
+        v=VEHICLES[vid]
+        if u["vehicle"]==vid:
+            await q.answer("Уже есть!",show_alert=True); return
+        if u["usd"]<v[1]:
+            await q.answer("Нужно $"+str(v[1]),show_alert=True); return
+        u["usd"]-=v[1]
+        u["vehicle"]=vid
+        save(d)
+        await q.answer(v[0]+" куплен!",show_alert=True)
+        await q.edit_message_text("Куплен: "+v[0]+"\n💵 Остаток: $"+str(int(u["usd"])))
         return
 
     if cb in ["s_rod","s_line","s_bait","s_storage"]:
@@ -228,10 +393,10 @@ async def btn(update,ctx):
         rows=[]
         for iid,idata in items.items():
             cur="✅ " if u[cat]==iid else ""
-            bonus_text=" | +"+str(idata[2])+"%" if len(idata)>2 and cat!="storage" else " | "+str(idata[2])+" рыб" if cat=="storage" else ""
-            rows.append([InlineKeyboardButton(cur+idata[0]+" | $"+str(idata[1])+bonus_text,callback_data="b_"+cat+"_"+iid)])
-        rows.append([InlineKeyboardButton("🔙 Назад",callback_data="back")])
-        await q.edit_message_text("Выбери:",reply_markup=InlineKeyboardMarkup(rows))
+            extra=" +"+str(idata[2])+"%" if cat!="storage" else " "+str(idata[2])+"рыб"
+            rows.append([InlineKeyboardButton(cur+idata[0]+" $"+str(idata[1])+extra,callback_data="b_"+cat+"_"+iid)])
+        rows.append([InlineKeyboardButton("Назад",callback_data="back")])
+        await q.edit_message_text("Выбери:\n💵 $"+str(int(u["usd"])),reply_markup=InlineKeyboardMarkup(rows))
         return
 
     if cb.startswith("b_"):
@@ -241,7 +406,7 @@ async def btn(update,ctx):
         items={"rod":RODS,"line":LINES,"bait":BAITS,"storage":STORAGE}[cat]
         item=items[iid]
         if u[cat]==iid: await q.answer("Уже есть!",show_alert=True); return
-        if u["usd"]<item[1]: await q.answer("Нужно $"+str(item[1]),show_alert=True); return
+        if u["usd"]<item[1]: await q.answer("Нужно $"+str(item[1])+"!",show_alert=True); return
         u["usd"]-=item[1]
         u[cat]=iid
         save(d)
@@ -250,23 +415,26 @@ async def btn(update,ctx):
 
     if cb=="back":
         rows=[
-            [InlineKeyboardButton("🎣 Удочки",callback_data="s_rod")],
-            [InlineKeyboardButton("🧵 Леска",callback_data="s_line")],
-            [InlineKeyboardButton("🪱 Наживка",callback_data="s_bait")],
-            [InlineKeyboardButton("📦 Хранилище",callback_data="s_storage")],
+            [InlineKeyboardButton("Удочки",callback_data="s_rod")],
+            [InlineKeyboardButton("Леска",callback_data="s_line")],
+            [InlineKeyboardButton("Наживка",callback_data="s_bait")],
+            [InlineKeyboardButton("Хранилище",callback_data="s_storage")],
         ]
-        await q.edit_message_text("🏪 Магазин\n💵 $"+str(int(u["usd"])),reply_markup=InlineKeyboardMarkup(rows))
+        await q.edit_message_text("Магазин\n💵 $"+str(int(u["usd"])),reply_markup=InlineKeyboardMarkup(rows))
 
 app=ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start",start))
-app.add_handler(CommandHandler("fish",fish))
-app.add_handler(CommandHandler("inv",inv))
-app.add_handler(CommandHandler("sell",sell))
-app.add_handler(CommandHandler("bal",bal))
-app.add_handler(CommandHandler("profile",profile))
-app.add_handler(CommandHandler("water",water))
-app.add_handler(CommandHandler("shop",shop))
-app.add_handler(CommandHandler("quest",quest))
+app.add_handler(CommandHandler("fish",do_fish))
+app.add_handler(CommandHandler("inv",do_inv))
+app.add_handler(CommandHandler("sell",do_sell))
+app.add_handler(CommandHandler("bal",do_bal))
+app.add_handler(CommandHandler("profile",do_profile))
+app.add_handler(CommandHandler("shop",do_shop))
+app.add_handler(CommandHandler("water",do_water))
+app.add_handler(CommandHandler("garage",do_garage))
+app.add_handler(CommandHandler("rates",do_rates))
+app.add_handler(CommandHandler("quest",do_quest))
 app.add_handler(CallbackQueryHandler(btn))
+app.add_handler(MessageHandler(filters.TEXT&~filters.COMMAND,txt))
 print("Bot started!")
 app.run_polling()
