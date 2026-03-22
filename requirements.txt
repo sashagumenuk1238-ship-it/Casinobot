@@ -1,4 +1,0 @@
-aiogram
-python-telegram-bot==22.5
-pyTelegramBotAPI
-
