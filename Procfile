@@ -1,1 +1,1 @@
-worker: python casino_bot.py
+worker: python farm_bot.py
