@@ -98,7 +98,7 @@ def catch_fish(u):
     pool = []
     for fid in water["fish"]:
         pool.extend([fid] * FISH[fid]["rare"])
-    return random.choice(pool) if pool else "karas"async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    return random.choice(pool) if pool else "karas" async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     get_user(uid)
     name = update.effective_user.first_name
