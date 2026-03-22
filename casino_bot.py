@@ -70,7 +70,7 @@ async def fish(update,ctx):
     if total>=st[2]:
         await update.message.reply_text("📦 "+st[0]+" полное! /sell рыбу")
         return
-    m=await update.message.reply_dice(emoji="🎣")
+    m=await update.message.reply_dice(emoji="🎲")
     bn=bonus(u)
     caught=m.dice.value>=4 or random.randint(1,100)<=bn//2
     if caught:
